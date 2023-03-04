@@ -14,6 +14,7 @@ services:
    - ./zbx_env/var/lib/zabbix/enc:/var/lib/zabbix/enc:ro
    - ./zbx_env/var/lib/zabbix/ssh_keys:/var/lib/zabbix/ssh_keys:ro
    - ./zbx_env/var/lib/zabbix/mibs:/var/lib/zabbix/mibs:ro
+   - snmptraps:/var/lib/zabbix/snmptraps:rw
 #   - ./env_vars/.ZBX_DB_CA_FILE:/run/secrets/root-ca.pem:ro
 #   - ./env_vars/.ZBX_DB_CERT_FILE:/run/secrets/client-cert.pem:ro
 #   - ./env_vars/.ZBX_DB_KEY_FILE:/run/secrets/client-key.pem:ro
@@ -65,8 +66,8 @@ services:
  zabbix-web-nginx-pgsql:
   image: zabbix/zabbix-web-nginx-pgsql:ubuntu-6.2-latest
   ports:
-   - "8080:8080"
-   - "8443:8443"
+   - "80:8080"
+   - "443:8443"
   volumes:
    - /etc/localtime:/etc/localtime:ro
 #   - ./env_vars/.ZBX_NGINX:/etc/nginx/conf.d/:ro
@@ -157,6 +158,37 @@ services:
    com.zabbix.component: "zabbix-agentd"
    com.zabbix.os: "ubuntu"
 
+ zabbix-snmptraps:
+  image: zabbix/zabbix-snmptraps:ubuntu-6.2-latest
+#  profiles:
+#   - full
+#   - all
+  ports:
+   - "162:1162/udp"
+  volumes:
+   - /etc/localtime:/etc/localtime:ro
+   - snmptraps:/var/lib/zabbix/snmptraps:rw
+  restart: always
+  deploy:
+   resources:
+    limits:
+      cpus: '0.5'
+      memory: 256M
+    reservations:
+      cpus: '0.25'
+      memory: 128M
+  networks:
+   zbx_net_frontend:
+    aliases:
+     - zabbix-snmptraps
+   zbx_net_backend:
+  stop_grace_period: 5s
+  labels:
+   com.zabbix.description: "Zabbix snmptraps"
+   com.zabbix.company: "Zabbix LLC"
+   com.zabbix.component: "snmptraps"
+   com.zabbix.os: "ubuntu"
+
  postgres-server:
   image: postgres:14-alpine
 #  command: -c ssl=on -c ssl_cert_file=/run/secrets/server-cert.pem -c ssl_key_file=/run/secrets/server-key.pem -c ssl_ca_file=/run/secrets/root-ca.pem
@@ -180,6 +212,42 @@ services:
      - pgsql-server
      - pgsql-database
 
+ grafana:
+  image: grafana/grafana
+  ports:
+  - "3000:3000"
+  volumes:
+   - /etc/localtime:/etc/localtime:ro
+   - './grafana/data:/var/lib/grafana'
+  deploy:
+   resources:
+    limits:
+      cpus: '0.70'
+      memory: 512M
+    reservations:
+      cpus: '0.5'
+      memory: 256M
+  environment: 
+   - GF_INSTALL_PLUGINS=alexanderzobnin-zabbix-app
+  restart: always
+  depends_on:
+   - postgres-server
+   - zabbix-server
+#  healthcheck:
+#   test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
+#   interval: 10s
+#   timeout: 5s
+#   retries: 3
+#   start_period: 30s
+  networks:
+   zbx_net_backend:
+    aliases:
+     - grafana
+   zbx_net_frontend:
+  stop_grace_period: 10s
+  sysctls:
+   - net.core.somaxconn=65535
+
 networks:
   zbx_net_frontend:
     driver: bridge
@@ -198,6 +266,9 @@ networks:
       driver: default
       config:
       - subnet: 172.16.239.0/24
+
+volumes:
+  snmptraps:
 
 secrets:
   POSTGRES_USER:
